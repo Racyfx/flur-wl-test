@@ -4,44 +4,40 @@
 <style>html,body{margin:0;height:100%;background:#0b0d10;color:#e9ecef;font:600 34px/1.4 Roboto,system-ui,sans-serif}main{padding:48px}b{color:#f2b84b}small{font-size:18px;opacity:.6}</style>
 </head><body><main id="m">Messung läuft …</main>
 <script>
-/* Isolierter Capability-Test fuer Echo Silk unter HTTPS. Enthaelt keine HA-Daten/Token.
-   Misst sofort, fordert ggf. Screen Wake Lock ohne Interaktion an, zeigt das Ergebnis
-   und kehrt nach 8 s per normaler Top-Level-Navigation zur lokalen Ergebnisseite zurueck
-   (Ziel per ?back=, Standard: http://192.168.178.151:8123/local/flur-echo/wakelock-result.html). */
+/* Isolierter Wake-Lock-Capability-Test (v3). Enthaelt keine HA-Daten.
+   Misst beim Laden ohne Interaktion, fordert ggf. einen Screen Wake Lock an, zeigt das Ergebnis
+   und sendet es EINMAL per HTTPS POST an ntfy.sh/<Topic aus ?t=>. Kein Ruecksprung, kein Polling.
+   Payload ausschliesslich: sc, api, wl, act, vis, err (nur error.name), ts. */
 (function () {
-  var q = new URLSearchParams(location.search);
-  var back = q.get('back') || 'http://192.168.178.151:8123/local/flur-echo/wakelock-result.html';
+  var q = new URLSearchParams(location.search), topic = q.get('t') || '';
   var u = navigator.userActivation;
-  var r = {
-    sc: window.isSecureContext ? 1 : 0,
-    api: ('wakeLock' in navigator) ? 1 : 0,
-    act: u ? (u.hasBeenActive ? 1 : 0) + '-' + (u.isActive ? 1 : 0) : 'na',
-    vis: document.visibilityState,
-    wl: 'pending', err: '', rel: 0
-  };
-  var sentinel = null;
-  function zeige(fertig) {
+  var r = { sc: window.isSecureContext ? 1 : 0, api: ('wakeLock' in navigator) ? 1 : 0,
+            act: u ? (u.hasBeenActive ? 1 : 0) + '/' + (u.isActive ? 1 : 0) : 'na',
+            vis: document.visibilityState, wl: 'pending', err: '' };
+  var sent = 'noch nicht gesendet';
+  function zeige() {
     document.getElementById('m').innerHTML =
       'SECURE CONTEXT: <b>' + r.sc + '</b><br>WAKE LOCK API: <b>' + r.api + '</b><br>REQUEST OHNE TOUCH: <b>' + r.wl + '</b>' +
-      (r.err ? ' <small>(' + r.err + ')</small>' : '') + '<br>USER ACTIVATION: <b>' + r.act + '</b><br>VIS: <b>' + r.vis + '</b>' +
-      '<br><small>' + (fertig ? 'Rücksprung zur lokalen Ergebnisseite …' : 'Messung läuft …') + '<br>' + navigator.userAgent + '</small>';
+      (r.err ? ' <small>(' + r.err + ')</small>' : '') + '<br>USER ACTIVATION: <b>' + r.act + '</b><br>VIS: <b>' + r.vis +
+      '</b><br><small>Rückkanal: ' + sent + '</small>';
   }
-  function ende() {
-    r.vis = document.visibilityState; zeige(true);
-    var p = new URLSearchParams({ sc: r.sc, api: r.api, wl: r.wl, act: r.act, vis: r.vis, rel: r.rel, err: r.err, held: sentinel && !sentinel.released ? 1 : 0, ua: navigator.userAgent.slice(0, 160) });
-    setTimeout(function () { location.href = back + (back.indexOf('?') < 0 ? '?' : '&') + p.toString(); }, 1500);
-  }
-  if (!r.sc) r.wl = 'insecure';
-  else if (!r.api) r.wl = 'unsupported';
-  else {
+  function senden() {
+    var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; };
+    var ts = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds());
+    var p = 'sc=' + r.sc + ';api=' + r.api + ';wl=' + r.wl + ';act=' + r.act + ';vis=' + r.vis + (r.err ? ';err=' + r.err : '') + ';ts=' + ts;
+    if (!/^flur-wl-[a-z0-9]{32}$/.test(topic)) { sent = 'FEHLER: kein gueltiges Topic'; zeige(); return; }
     try {
-      navigator.wakeLock.request('screen').then(function (s) {
-        sentinel = s; window.__wl = s; r.wl = 'granted'; zeige(false);
-        s.addEventListener('release', function () { r.rel = 1; });
-      }, function (e) { r.wl = (e && e.name === 'NotAllowedError') ? 'denied' : 'error'; r.err = (e && (e.name + ': ' + e.message)) || '?'; zeige(false); });
-    } catch (e) { r.wl = 'error'; r.err = String(e); }
+      fetch('https://ntfy.sh/' + topic, { method: 'POST', body: p, credentials: 'omit', referrerPolicy: 'no-referrer' })
+        .then(function (x) { sent = x.ok ? 'gesendet' : 'FEHLER HTTP ' + x.status; zeige(); },
+              function (e) { sent = 'FEHLER: ' + ((e && e.name) || '?'); zeige(); });
+    } catch (e) { sent = 'FEHLER: ' + ((e && e.name) || '?'); zeige(); }
   }
-  zeige(false);
-  setTimeout(ende, 8000);
+  function fertig() { r.vis = document.visibilityState; zeige(); senden(); }
+  if (!r.api) { r.wl = 'unsupported'; zeige(); setTimeout(fertig, 1000); return; }
+  try {
+    navigator.wakeLock.request('screen').then(function (s) { window.__wl = s; r.wl = 'granted'; zeige(); setTimeout(fertig, 1000); },
+      function (e) { r.wl = (e && e.name === 'NotAllowedError') ? 'denied' : 'error'; r.err = (e && e.name) || '?'; zeige(); setTimeout(fertig, 1000); });
+  } catch (e) { r.wl = 'error'; r.err = (e && e.name) || '?'; zeige(); setTimeout(fertig, 1000); }
+  zeige();
 })();
 </script></body></html>
