@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FLUR WAKE LOCK TEST</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0b0d10;color:#e9ecef;font:600 30px/1.35 Roboto,system-ui,sans-serif}
+main{padding:36px 48px}h1{margin:0 0 18px;font-size:46px;letter-spacing:.04em;color:#f2b84b}
+table{border-collapse:collapse}td{padding:6px 28px 6px 0;vertical-align:top}td:first-child{opacity:.7;font-weight:500}
+b{font-size:34px}.ok{color:#7bd88f}.no{color:#ff6b6b}.wait{color:#9aa4ad}
+</style></head><body><main>
+<h1>FLUR WAKE LOCK TEST</h1>
+<table>
+<tr><td>Seite geladen</td><td><b class="ok">JA</b></td></tr>
+<tr><td>Secure Context</td><td><b id="sc" class="wait">…</b></td></tr>
+<tr><td>Wake Lock API</td><td><b id="api" class="wait">…</b></td></tr>
+<tr><td>User Activation</td><td><b id="act" class="wait">…</b></td></tr>
+<tr><td>Visibility</td><td><b id="vis" class="wait">…</b></td></tr>
+<tr><td>Wake Lock Request</td><td><b id="wl" class="wait">LÄUFT …</b></td></tr>
+<tr><td>Fehler</td><td><b id="err">–</b></td></tr>
+<tr><td>ntfy</td><td><b id="nt" class="wait">NOCH NICHT</b></td></tr>
+<tr><td>Zeit</td><td><b id="ts">–</b></td></tr>
+</table>
+</main>
+<script>
+/* Wake-Lock-Test v4 (nur unter Sichtkontakt). Keine HA-Daten.
+   Misst beim Laden ohne Interaktion, fordert ggf. einmal einen Screen Wake Lock an,
+   zeigt alles dauerhaft an und sendet EINMAL an ntfy.sh/<Topic aus ?t=> (falls angegeben).
+   Kein Reload, kein Ruecksprung, kein Polling. Payload: sc, api, wl, act, vis, err (nur error.name), ts. */
+(function () {
+  function set(id, txt, cls) { var e = document.getElementById(id); e.textContent = txt; if (cls !== undefined) e.className = cls; }
+  var q = new URLSearchParams(location.search), topic = q.get('t') || '';
+  var u = navigator.userActivation;
+  var sc = window.isSecureContext ? 1 : 0, api = ('wakeLock' in navigator) ? 1 : 0;
+  var act = u ? (u.hasBeenActive ? 1 : 0) + '/' + (u.isActive ? 1 : 0) : 'nicht verfügbar';
+  var vis = document.visibilityState, wl = '', err = '';
+  var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; };
+  var ts = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds());
+  set('sc', sc ? 'JA' : 'NEIN', sc ? 'ok' : 'no');
+  set('api', api ? 'JA' : 'NEIN', api ? 'ok' : 'no');
+  set('act', act, '');
+  set('vis', vis, vis === 'visible' ? 'ok' : 'no');
+  set('ts', ts, '');
+  function senden() {
+    if (!/^flur-wl-[a-z0-9]{32}$/.test(topic)) { set('nt', 'NICHT GESENDET (kein Topic)', 'wait'); return; }
+    var p = 'sc=' + sc + ';api=' + api + ';wl=' + wl + ';act=' + act + ';vis=' + vis + (err ? ';err=' + err : '') + ';ts=' + ts;
+    try {
+      fetch('https://ntfy.sh/' + topic, { method: 'POST', body: p, credentials: 'omit', referrerPolicy: 'no-referrer' })
+        .then(function (x) { set('nt', x.ok ? 'GESENDET' : 'FEHLER (HTTP ' + x.status + ')', x.ok ? 'ok' : 'no'); },
+              function (e) { set('nt', 'FEHLER (' + ((e && e.name) || '?') + ')', 'no'); });
+    } catch (e) { set('nt', 'FEHLER (' + ((e && e.name) || '?') + ')', 'no'); }
+  }
+  function ende(w, cls, e) { wl = w; err = e || ''; set('wl', w.toUpperCase(), cls); set('err', err || '–', ''); vis = document.visibilityState; set('vis', vis, vis === 'visible' ? 'ok' : 'no'); senden(); }
+  if (!api) { ende('nicht verfügbar', 'no'); return; }
+  try {
+    navigator.wakeLock.request('screen').then(function (s) { window.__wl = s; ende('granted', 'ok'); },
+      function (e) { ende((e && e.name === 'NotAllowedError') ? 'denied' : 'error', 'no', (e && e.name) || '?'); });
+  } catch (e) { ende('error', 'no', (e && e.name) || '?'); }
+})();
+</script></body></html>
