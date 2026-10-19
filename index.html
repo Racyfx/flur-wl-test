@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wake-Lock-Capability-Test</title>
+<style>html,body{margin:0;height:100%;background:#0b0d10;color:#e9ecef;font:600 34px/1.4 Roboto,system-ui,sans-serif}main{padding:48px}b{color:#f2b84b}small{font-size:18px;opacity:.6}</style>
+</head><body><main id="m">Messung läuft …</main>
+<script>
+/* Isolierter Capability-Test fuer Echo Silk unter HTTPS. Enthaelt keine HA-Daten/Token.
+   Misst sofort, fordert ggf. Screen Wake Lock ohne Interaktion an, zeigt das Ergebnis
+   und kehrt nach 8 s per normaler Top-Level-Navigation zur lokalen Ergebnisseite zurueck
+   (Ziel per ?back=, Standard: http://192.168.178.151:8123/local/flur-echo/wakelock-result.html). */
+(function () {
+  var q = new URLSearchParams(location.search);
+  var back = q.get('back') || 'http://192.168.178.151:8123/local/flur-echo/wakelock-result.html';
+  var u = navigator.userActivation;
+  var r = {
+    sc: window.isSecureContext ? 1 : 0,
+    api: ('wakeLock' in navigator) ? 1 : 0,
+    act: u ? (u.hasBeenActive ? 1 : 0) + '-' + (u.isActive ? 1 : 0) : 'na',
+    vis: document.visibilityState,
+    wl: 'pending', err: '', rel: 0
+  };
+  var sentinel = null;
+  function zeige(fertig) {
+    document.getElementById('m').innerHTML =
+      'SECURE CONTEXT: <b>' + r.sc + '</b><br>WAKE LOCK API: <b>' + r.api + '</b><br>REQUEST OHNE TOUCH: <b>' + r.wl + '</b>' +
+      (r.err ? ' <small>(' + r.err + ')</small>' : '') + '<br>USER ACTIVATION: <b>' + r.act + '</b><br>VIS: <b>' + r.vis + '</b>' +
+      '<br><small>' + (fertig ? 'Rücksprung zur lokalen Ergebnisseite …' : 'Messung läuft …') + '<br>' + navigator.userAgent + '</small>';
+  }
+  function ende() {
+    r.vis = document.visibilityState; zeige(true);
+    var p = new URLSearchParams({ sc: r.sc, api: r.api, wl: r.wl, act: r.act, vis: r.vis, rel: r.rel, err: r.err, held: sentinel && !sentinel.released ? 1 : 0, ua: navigator.userAgent.slice(0, 160) });
+    setTimeout(function () { location.href = back + (back.indexOf('?') < 0 ? '?' : '&') + p.toString(); }, 1500);
+  }
+  if (!r.sc) r.wl = 'insecure';
+  else if (!r.api) r.wl = 'unsupported';
+  else {
+    try {
+      navigator.wakeLock.request('screen').then(function (s) {
+        sentinel = s; window.__wl = s; r.wl = 'granted'; zeige(false);
+        s.addEventListener('release', function () { r.rel = 1; });
+      }, function (e) { r.wl = (e && e.name === 'NotAllowedError') ? 'denied' : 'error'; r.err = (e && (e.name + ': ' + e.message)) || '?'; zeige(false); });
+    } catch (e) { r.wl = 'error'; r.err = String(e); }
+  }
+  zeige(false);
+  setTimeout(ende, 8000);
+})();
+</script></body></html>
